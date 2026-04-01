@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Temporary / Research files (HTML dumps and test scripts)
+*.html
+test_*.py
+inspect_meta.py
+compare_urls.py
+decode.py
+demo_scraper.py
+dump_html.py
+
+# Docker local data
+.docker/

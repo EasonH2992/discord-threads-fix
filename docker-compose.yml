@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  threads-bot:
+    build: .
+    container_name: threads-preview-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Alternatively, you can define the token here directly for Unraid template
+    # environment:
+    #   - DISCORD_TOKEN=your_token_here
