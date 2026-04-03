@@ -78,6 +78,10 @@ async def on_message(message):
                 else:
                     embed.set_thumbnail(url=metadata["image"])
             
+            if metadata.get("taken_at"):
+                # Discord embed timestamp expects a UTC datetime object
+                embed.timestamp = datetime.fromtimestamp(metadata["taken_at"], tz=timezone.utc)
+
             embed.set_footer(
                 text="Threads", 
                 icon_url="https://cdn-icons-png.flaticon.com/128/12105/12105338.png"

@@ -52,9 +52,14 @@ async def fetch_threads_metadata(url: str):
             if not metadata["title"] and soup.title:
                 metadata["title"] = soup.title.string
 
-            # If still nothing, maybe it's a dynamic page that needs more aggressive scraping
-            # But Threads usually serves OG tags to bots.
-            
+            # Try to extract the timestamp from the JSON blobs
+            # Look for "taken_at":1234567890
+            match = re.search(r'"taken_at":(\d+)', response.text)
+            if match:
+                metadata["taken_at"] = int(match.group(1))
+            else:
+                metadata["taken_at"] = None
+
             return metadata
             
     except Exception as e:
