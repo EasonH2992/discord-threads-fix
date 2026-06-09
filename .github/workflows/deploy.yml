@@ -10,7 +10,7 @@ jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/dev'
     runs-on: test
-    environment: dev
+    environment: test
 
     steps:
       - name: Checkout repository
