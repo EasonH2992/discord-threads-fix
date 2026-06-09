@@ -3,7 +3,7 @@ name: Local Docker Build and Deploy
 on:
   push:
     branches:
-      - '**'
+      - main
 
 jobs:
   local-deploy:
