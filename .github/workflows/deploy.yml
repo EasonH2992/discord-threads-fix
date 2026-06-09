@@ -21,3 +21,17 @@ jobs:
 
       - name: Post-deployment cleanup
         run: docker image prune -f
+
+      - name: Notify Discord (success)
+        if: success()
+        run: |
+          curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
+            -H "Content-Type: application/json" \
+            -d '{"content": "✅ Deploy succeeded: `${{ github.repository }}` @ `${{ github.sha }}`"}'
+
+      - name: Notify Discord (failure)
+        if: failure()
+        run: |
+          curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
+            -H "Content-Type: application/json" \
+            -d '{"content": "❌ Deploy failed: `${{ github.repository }}` @ `${{ github.sha }}`"}'
