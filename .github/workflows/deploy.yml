@@ -9,28 +9,15 @@ jobs:
   local-deploy:
     runs-on: self-hosted
 
-    env:
-      APP_NAME: "discord-threads-fix"
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clean up old container
+      - name: Deploy with Docker Compose
         run: |
-          docker stop ${{ env.APP_NAME }} || true
-          docker rm ${{ env.APP_NAME }} || true
-
-      - name: Build Docker Image
-        run: docker build -t ${{ env.APP_NAME }}:latest .
-
-      - name: Run Container
-        run: |
-          docker run -d \
-            --name ${{ env.APP_NAME }} \
-            --restart always \
-            --env-file /opt/discord-threads-fix/.env \
-            ${{ env.APP_NAME }}:latest
+          cp /opt/discord-threads-fix/.env .env
+          docker compose down
+          docker compose up -d --build
 
       - name: Post-deployment cleanup
         run: docker image prune -f
