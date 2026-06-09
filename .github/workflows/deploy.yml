@@ -4,10 +4,13 @@ on:
   push:
     branches:
       - main
+      - dev
 
 jobs:
-  local-deploy:
-    runs-on: self-hosted
+  deploy-dev:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: test
+    environment: dev
 
     steps:
       - name: Checkout repository
@@ -27,11 +30,43 @@ jobs:
         run: |
           curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
             -H "Content-Type: application/json" \
-            -d '{"content": "✅ Deploy succeeded: `${{ github.repository }}` @ `${{ github.sha }}`"}'
+            -d '{"content": "✅ [dev] Deploy succeeded: `${{ github.repository }}` @ `${{ github.sha }}`"}'
 
       - name: Notify Discord (failure)
         if: failure()
         run: |
           curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
             -H "Content-Type: application/json" \
-            -d '{"content": "❌ Deploy failed: `${{ github.repository }}` @ `${{ github.sha }}`"}'
+            -d '{"content": "❌ [dev] Deploy failed: `${{ github.repository }}` @ `${{ github.sha }}`"}'
+
+  deploy-main:
+    if: github.ref == 'refs/heads/main'
+    runs-on: main
+    environment: main
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy with Docker Compose
+        run: |
+          echo "${{ secrets.ENV }}" > .env
+          docker compose down
+          docker compose up -d --build
+
+      - name: Post-deployment cleanup
+        run: docker image prune -f
+
+      - name: Notify Discord (success)
+        if: success()
+        run: |
+          curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
+            -H "Content-Type: application/json" \
+            -d '{"content": "✅ [main] Deploy succeeded: `${{ github.repository }}` @ `${{ github.sha }}`"}'
+
+      - name: Notify Discord (failure)
+        if: failure()
+        run: |
+          curl -s -X POST ${{ secrets.DISCORD_WEBHOOK }} \
+            -H "Content-Type: application/json" \
+            -d '{"content": "❌ [main] Deploy failed: `${{ github.repository }}` @ `${{ github.sha }}`"}'
