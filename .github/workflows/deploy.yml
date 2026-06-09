@@ -15,7 +15,7 @@ jobs:
 
       - name: Deploy with Docker Compose
         run: |
-          cp /opt/discord-threads-fix/.env .env
+          echo "${{ secrets.ENV }}" > .env
           docker compose down
           docker compose up -d --build
 
