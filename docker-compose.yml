@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   threads-bot:
@@ -7,6 +6,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./logs:/app/logs
     # Alternatively, you can define the token here directly for Unraid template
     # environment:
     #   - DISCORD_TOKEN=your_token_here

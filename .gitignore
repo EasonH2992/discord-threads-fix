@@ -11,14 +11,25 @@ venv/
 env/
 .venv/
 
-# Temporary / Research files (HTML dumps and test scripts)
+# Temporary / Research files (HTML dumps, test scripts, data dumps)
 *.html
+*.png
 test_*.py
-inspect_meta.py
-compare_urls.py
+analyze_*.py
+check_*.py
+compare_*.py
+search_*.py
+find_*.py
+inspect_*.py
 decode.py
 demo_scraper.py
 dump_html.py
+print_body.py
+extract_json.py
+*.txt
+*.json
+threads/
+persona-analysis/
 
 # Docker local data
 .docker/
