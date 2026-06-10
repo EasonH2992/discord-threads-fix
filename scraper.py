@@ -70,33 +70,35 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                     metadata["taken_at"] = None
 
                 # Extract reply context for Threads reply posts
-                # reply_to_author gives us the username; thread_items[0] is the parent post
+                # Use is_reply from page props (BarcelonaPostColumnPage) as the authoritative flag.
+                # reply_to_author appears in replies of replies too, so we can't use it alone.
                 metadata["reply_to"] = None
-                rta_match = re.search(r'"reply_to_author":\{"[^}]*?"username":"([^"]+)"', response.text)
-                if rta_match:
-                    parent_username = rta_match.group(1)
-                    parent_text = None
-                    ti_idx = response.text.find('"thread_items":[')
-                    if ti_idx != -1:
-                        slice_ = response.text[ti_idx:ti_idx + 5000]
-                        # 1. Try caption.text (plain text post)
-                        cap_m = re.search(r'"caption":\{"text":"((?:[^"\\]|\\.)*)"', slice_)
-                        if cap_m:
-                            try:
-                                import json as _json
-                                parent_text = _json.loads('"' + cap_m.group(1) + '"')
-                            except Exception:
-                                parent_text = cap_m.group(1)
-                        # 2. Fallback: link_preview title (reel / linked post)
-                        if not parent_text:
-                            lp_m = re.search(r'"link_preview_attachment":\{[^}]*?"title":"((?:[^"\\]|\\.)*)"', slice_)
-                            if lp_m:
+                if '"is_reply":true' in response.text:
+                    rta_match = re.search(r'"reply_to_author":\{"[^}]*?"username":"([^"]+)"', response.text)
+                    if rta_match:
+                        parent_username = rta_match.group(1)
+                        parent_text = None
+                        ti_idx = response.text.find('"thread_items":[')
+                        if ti_idx != -1:
+                            slice_ = response.text[ti_idx:ti_idx + 5000]
+                            # 1. Try caption.text (plain text post)
+                            cap_m = re.search(r'"caption":\{"text":"((?:[^"\\]|\\.)*)"', slice_)
+                            if cap_m:
                                 try:
                                     import json as _json
-                                    parent_text = _json.loads('"' + lp_m.group(1) + '"')
+                                    parent_text = _json.loads('"' + cap_m.group(1) + '"')
                                 except Exception:
-                                    parent_text = lp_m.group(1)
-                    metadata["reply_to"] = {"username": parent_username, "text": parent_text}
+                                    parent_text = cap_m.group(1)
+                            # 2. Fallback: link_preview title (reel / linked post)
+                            if not parent_text:
+                                lp_m = re.search(r'"link_preview_attachment":\{[^}]*?"title":"((?:[^"\\]|\\.)*)"', slice_)
+                                if lp_m:
+                                    try:
+                                        import json as _json
+                                        parent_text = _json.loads('"' + lp_m.group(1) + '"')
+                                    except Exception:
+                                        parent_text = lp_m.group(1)
+                        metadata["reply_to"] = {"username": parent_username, "text": parent_text}
 
                 # Try to extract carousel images (multi-image posts)
                 # Extract media ID from og:image ig_cache_key to validate carousel ownership
