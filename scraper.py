@@ -70,23 +70,9 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                     metadata["taken_at"] = None
 
                 # Try to extract carousel images (multi-image posts)
-                # Extract media ID from og:image ig_cache_key to validate carousel ownership
-                import json, base64, urllib.parse
-                og_media_id = None
-                if metadata["image"]:
-                    ck_match = re.search(r'ig_cache_key=([^&]+)', metadata["image"])
-                    if ck_match:
-                        try:
-                            og_media_id = base64.b64decode(
-                                urllib.parse.unquote(ck_match.group(1)) + "=="
-                            ).decode("ascii", errors="replace").strip("\x00").rstrip("?")
-                        except Exception:
-                            pass
-
-                # Skip carousel extraction for Reels: og:image has no ig_cache_key (CLIPS urlgen)
-                # and og:video is present, meaning this is a video post, not a photo carousel.
+                import json
                 idx = response.text.find('"carousel_media":[')
-                if idx != -1 and og_media_id is not None:
+                if idx != -1:
                     start = idx + len('"carousel_media":')
                     depth, i = 0, start
                     while i < len(response.text):
@@ -98,25 +84,10 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                         i += 1
                     try:
                         carousel = json.loads(response.text[start:i+1])
-                        # Validate: first carousel item's media ID must match og:image media ID
-                        valid = True
-                        if og_media_id and carousel:
-                            first_candidates = carousel[0].get("image_versions2", {}).get("candidates", [])
-                            if first_candidates:
-                                c1_ck = re.search(r'ig_cache_key=([^&]+)', first_candidates[0].get("url", ""))
-                                if c1_ck:
-                                    try:
-                                        c1_id = base64.b64decode(
-                                            urllib.parse.unquote(c1_ck.group(1)) + "=="
-                                        ).decode("ascii", errors="replace").strip("\x00").rstrip("?")
-                                        valid = (c1_id == og_media_id)
-                                    except Exception:
-                                        valid = False
-                        if valid:
-                            for item in carousel[:4]:
-                                candidates = item.get("image_versions2", {}).get("candidates", [])
-                                if candidates:
-                                    metadata["images"].append(candidates[0]["url"])
+                        for item in carousel[:4]:
+                            candidates = item.get("image_versions2", {}).get("candidates", [])
+                            if candidates:
+                                metadata["images"].append(candidates[0]["url"])
                     except Exception:
                         pass
 
