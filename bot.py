@@ -221,6 +221,9 @@ async def on_message(message):
                     
                     # Strip whitespace first to handle cases like '". '
                     clean_desc = clean_desc.strip()
+                    # IG sometimes prepends a lone "." before the actual content
+                    if clean_desc.startswith(".\n"):
+                        clean_desc = clean_desc[2:].strip()
                     if clean_desc.endswith("\"."):
                         clean_desc = clean_desc[:-2]
                     elif clean_desc.endswith("\""):
