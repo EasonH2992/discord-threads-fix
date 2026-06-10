@@ -125,7 +125,7 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                     if attempt < max_retries - 1:
                         ua_next = _USER_AGENTS[(attempt + 1) % len(_USER_AGENTS)]
                         print(f"Got login page for {url}. Retrying with UA '{ua_next}'... ({attempt + 1}/{max_retries})")
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(5)
                         continue
                     else:
                         print(f"Got login page for {url}. All {max_retries} UAs exhausted.")
