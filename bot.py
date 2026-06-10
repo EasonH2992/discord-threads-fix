@@ -193,7 +193,7 @@ async def on_message(message):
         metadata = await fetch_metadata(clean_url)
         
         if metadata:
-            log_metadata(clean_url, metadata)
+            # log_metadata(clean_url, metadata)
             # Create Embed
             description = metadata.get("description") or ""
             raw_title = metadata.get("title") or "Meta Post"
