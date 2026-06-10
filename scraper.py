@@ -92,7 +92,11 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                         pass
 
                 # Detect login wall (Threads redirected to a sign-in page)
-                if metadata.get("description") and metadata["description"].startswith("Join Threads to share ideas"):
+                is_login_wall = (
+                    (metadata.get("description") and metadata["description"].startswith("Join Threads to share ideas"))
+                    or ("Join Threads" in response.text and not metadata.get("description"))
+                )
+                if is_login_wall:
                     if attempt < max_retries - 1:
                         ua_next = _USER_AGENTS[(attempt + 1) % len(_USER_AGENTS)]
                         print(f"Got login page for {url}. Retrying with UA '{ua_next}'... ({attempt + 1}/{max_retries})")
