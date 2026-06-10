@@ -15,5 +15,9 @@ COPY . .
 ENV DISCORD_TOKEN=your_token_here
 ENV PYTHONUNBUFFERED=1
 
+# Create logs dir and run as non-root
+RUN useradd -m appuser && mkdir -p /app/logs/threads && chown -R appuser /app
+USER appuser
+
 # Run the bot
 CMD ["python", "-u", "bot.py"]

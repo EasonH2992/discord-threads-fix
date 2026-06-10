@@ -4,11 +4,10 @@ services:
     build: .
     container_name: discord-threads-fix46
     restart: unless-stopped
-    user: "1001:1001"
     env_file:
       - .env
     volumes:
-      #- ./logs:/app/logs
+      - ./logs:/app/logs
     # Alternatively, you can define the token here directly for Unraid template
     # environment:
     #   - DISCORD_TOKEN=your_token_here
