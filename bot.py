@@ -235,6 +235,16 @@ async def on_message(message):
             else:
                 # Threads: no length limit
                 embed_title = raw_title
+                # Prepend reply context if this is a reply post
+                reply_to = metadata.get("reply_to")
+                if reply_to:
+                    parent_line = f"> 💬 回覆 @{reply_to['username']}："
+                    if reply_to.get("text"):
+                        parent_text = reply_to["text"]
+                        if len(parent_text) > 100:
+                            parent_text = parent_text[:100] + "..."
+                        parent_line += "\n> " + parent_text.replace("\n", "\n> ")
+                    description = parent_line + ("\n\n" + description if description else "")
 
             embed = discord.Embed(
                 title=embed_title,
