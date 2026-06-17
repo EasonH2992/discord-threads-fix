@@ -4,27 +4,39 @@ import re
 import asyncio
 
 _USER_AGENTS = [
-    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
     "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "WhatsApp/2.21.12.21 A",
+    "TelegramBot (like TwitterBot)",
+    "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient/4.2.1; +http://www.linkedin.com)",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
     "curl/8.7.1",
 ]
 
-async def fetch_metadata(url: str, max_retries: int = 3):
+async def fetch_metadata(url: str, max_retries: int = None):
     """
     Fetches OpenGraph metadata from a Threads or Instagram URL with retry logic.
     On login wall, rotates User-Agent across retries.
     """
+    if max_retries is None:
+        max_retries = len(_USER_AGENTS)
+
     for attempt in range(max_retries):
+        ua = _USER_AGENTS[attempt % len(_USER_AGENTS)]
         headers = {
-            "User-Agent": _USER_AGENTS[attempt % len(_USER_AGENTS)],
+            "User-Agent": ua,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
         }
         try:
             async with httpx.AsyncClient(follow_redirects=True, headers=headers, timeout=10.0) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 
-                soup = BeautifulSoup(response.text, 'html.parser')
+                # Use response.content and let BeautifulSoup handle encoding or detect it from headers
+                content = response.content
+                soup = BeautifulSoup(content, 'html.parser', from_encoding=response.encoding)
                 
                 metadata = {
                     "title": None,
@@ -52,9 +64,8 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                 metadata["type"] = get_meta(soup, [{"property": "og:type"}, {"name": "og:type"}])
                 metadata["card"] = get_meta(soup, [{"name": "twitter:card"}])
 
-                # Fallback for description if og:description is missing (often just the content of the post)
+                # Fallback for description if og:description is missing
                 if not metadata["description"]:
-                    # Sometimes the description is in twitter:description
                     metadata["description"] = get_meta(soup, [{"name": "twitter:description"}])
 
                 # Fallback for title if og:title is missing
@@ -62,7 +73,6 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                     metadata["title"] = soup.title.string
 
                 # Try to extract the timestamp from the JSON blobs
-                # Look for "taken_at":1234567890
                 match = re.search(r'"taken_at":(\d+)', response.text)
                 if match:
                     metadata["taken_at"] = int(match.group(1))
@@ -92,15 +102,22 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                         pass
 
                 # Detect login wall (Threads redirected to a sign-in page)
+                desc = metadata.get("description")
+                title = metadata.get("title") or ""
+                
                 is_login_wall = (
-                    (metadata.get("description") and metadata["description"].startswith("Join Threads to share ideas"))
-                    or ("Join Threads" in response.text and not metadata.get("description"))
+                    (desc and "Join Threads" in desc)
+                    or (desc and "加入 Threads" in desc)
+                    or ("Join Threads" in response.text and not desc)
+                    or ("login" in str(response.url).lower())
+                    or (title.startswith("Threads • Log in"))
+                    or (title.startswith("Threads • 登入"))
                 )
+                
                 if is_login_wall:
                     if attempt < max_retries - 1:
-                        ua_next = _USER_AGENTS[(attempt + 1) % len(_USER_AGENTS)]
-                        print(f"Got login page for {url}. Retrying with UA '{ua_next}'... ({attempt + 1}/{max_retries})")
-                        await asyncio.sleep(5)
+                        next_ua = _USER_AGENTS[(attempt + 1) % len(_USER_AGENTS)]
+                        print(f"Got login page for {url} with UA '{ua}'. Retrying with UA '{next_ua}'... ({attempt + 1}/{max_retries})")
                         continue
                     else:
                         print(f"Got login page for {url}. All {max_retries} UAs exhausted.")
@@ -110,11 +127,12 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                 
         except Exception as e:
             if attempt < max_retries - 1:
-                print(f"Error fetching metadata for {url}: {e}. Retrying in 3 seconds... ({attempt + 1}/{max_retries})")
-                await asyncio.sleep(3)
+                print(f"Error fetching metadata for {url}: {e}. Retrying with next UA... ({attempt + 1}/{max_retries})")
+                await asyncio.sleep(2)
             else:
                 print(f"Error fetching metadata for {url}: {e}. Max retries reached.")
                 return None
+
 
 if __name__ == "__main__":
     import asyncio
