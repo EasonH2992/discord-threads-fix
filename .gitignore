@@ -14,6 +14,7 @@ env/
 # Temporary / Research files (HTML dumps, test scripts, data dumps)
 *.html
 *.png
+!assets/*.png
 test_*.py
 analyze_*.py
 check_*.py
