@@ -69,27 +69,49 @@ async def fetch_metadata(url: str, max_retries: int = 3):
                 else:
                     metadata["taken_at"] = None
 
-                # Try to extract carousel images (multi-image posts)
+                # Try to extract carousel images (multi-image posts).
+                # Only attempt when og:image is an actual post image (summary_large_image),
+                # not a profile picture (summary). Text-only posts use Card=summary and their
+                # og:image is the poster's profile pic; any carousel_media found in the HTML
+                # would belong to a different post embedded on the page.
                 import json
-                idx = response.text.find('"carousel_media":[')
-                if idx != -1:
-                    start = idx + len('"carousel_media":')
-                    depth, i = 0, start
-                    while i < len(response.text):
-                        if response.text[i] == '[': depth += 1
-                        elif response.text[i] == ']':
-                            depth -= 1
-                            if depth == 0:
-                                break
-                        i += 1
-                    try:
-                        carousel = json.loads(response.text[start:i+1])
-                        for item in carousel[:4]:
-                            candidates = item.get("image_versions2", {}).get("candidates", [])
-                            if candidates:
-                                metadata["images"].append(candidates[0]["url"])
-                    except Exception:
-                        pass
+                if metadata.get("card") == "summary_large_image" and metadata.get("image"):
+                    idx = response.text.find('"carousel_media":[')
+                    if idx != -1:
+                        start = idx + len('"carousel_media":')
+                        depth, i = 0, start
+                        while i < len(response.text):
+                            if response.text[i] == '[': depth += 1
+                            elif response.text[i] == ']':
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            i += 1
+                        try:
+                            carousel = json.loads(response.text[start:i+1])
+                            images = []
+                            for item in carousel[:4]:
+                                candidates = item.get("image_versions2", {}).get("candidates", [])
+                                if candidates:
+                                    images.append(candidates[0]["url"])
+                            # Validate that this carousel belongs to the target post by checking
+                            # whether the og:image numeric media-file ID (e.g. "724640022" in
+                            # "724640022_17945406252200696_..._n.jpg") appears in any carousel
+                            # item. Threads sometimes uses a non-first item (e.g. video cover
+                            # frame) as og:image, so we check all items, not just carousel[0].
+                            # No match means the carousel_media block came from a different post.
+                            if images:
+                                og_id = re.search(r'/(\d{9,})_\d+_\d+_n\.', metadata["image"])
+                                if og_id:
+                                    carousel_ids = [
+                                        m.group(1) for url in images
+                                        if (m := re.search(r'/(\d{9,})_\d+_\d+_n\.', url))
+                                    ]
+                                    if og_id.group(1) not in carousel_ids:
+                                        images = []
+                            metadata["images"] = images
+                        except Exception:
+                            pass
 
                 # Detect login wall (Threads redirected to a sign-in page)
                 is_login_wall = (

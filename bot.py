@@ -136,7 +136,7 @@ async def lazypack(interaction: discord.Interaction, hours: int = 1):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=86400) as client:
             resp = await client.post(DIFY_API_URL, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -148,10 +148,12 @@ async def lazypack(interaction: discord.Interaction, hours: int = 1):
             or str(data)
         )
     except httpx.HTTPStatusError as e:
-        await interaction.followup.send(f'Dify 回傳錯誤：{e.response.status_code}\n```{e.response.text[:500]}```', ephemeral=True)
+        print(f"Dify HTTP error {e.response.status_code}: {e.response.text[:500]}", flush=True)
+        await interaction.followup.send(f'Dify 回傳錯誤：{e.response.status_code}', ephemeral=True)
         return
     except Exception as e:
-        await interaction.followup.send(f'傳送至 Dify 時發生錯誤：{e}', ephemeral=True)
+        print(f"Dify request error: {e}", flush=True)
+        await interaction.followup.send('傳送至 Dify 時發生錯誤，請稍後再試。', ephemeral=True)
         return
 
     # Discord 訊息上限 2000 字，超過則截斷
