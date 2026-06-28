@@ -33,3 +33,6 @@ persona-analysis/
 
 # Docker local data
 .docker/
+
+# Threads session cookies (contains sensitive auth tokens)
+cookies.json

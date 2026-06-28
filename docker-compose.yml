@@ -8,6 +8,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ./cookies.json:/app/cookies.json:ro
     # Alternatively, you can define the token here directly for Unraid template
     # environment:
     #   - DISCORD_TOKEN=your_token_here
