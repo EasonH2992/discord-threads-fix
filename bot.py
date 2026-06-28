@@ -278,7 +278,12 @@ async def on_message(message):
                 response = await message.reply(embed=embed, mention_author=False, silent=True)
 
             response_map[message.id] = response.id
-            
+
+            try:
+                await message.edit(suppress=True)
+            except discord.Forbidden:
+                pass
+
             # Keep map size in check (limit to last 1000 messages)
             if len(response_map) > 1000:
                 oldest_key = next(iter(response_map))
