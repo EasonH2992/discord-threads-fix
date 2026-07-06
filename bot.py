@@ -43,6 +43,8 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 DIFY_API_KEY = os.getenv('DIFY_API_KEY')
 DIFY_API_URL = os.getenv('DIFY_API_URL')
+CF_ACCESS_CLIENT_ID = os.getenv('CF_ACCESS_CLIENT_ID')
+CF_ACCESS_CLIENT_SECRET = os.getenv('CF_ACCESS_CLIENT_SECRET')
 
 # Bot setup
 intents = discord.Intents.default()
@@ -133,6 +135,8 @@ async def lazypack(interaction: discord.Interaction, hours: int = 1):
     headers = {
         'Authorization': f'Bearer {DIFY_API_KEY}',
         'Content-Type': 'application/json',
+        'CF-Access-Client-Id': CF_ACCESS_CLIENT_ID,
+        'CF-Access-Client-Secret': CF_ACCESS_CLIENT_SECRET,
     }
 
     try:
