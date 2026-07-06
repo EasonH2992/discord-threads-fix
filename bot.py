@@ -43,6 +43,8 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 DIFY_API_KEY = os.getenv('DIFY_API_KEY')
 DIFY_API_URL = os.getenv('DIFY_API_URL')
+CF_ACCESS_CLIENT_ID = os.getenv('CF_ACCESS_CLIENT_ID')
+CF_ACCESS_CLIENT_SECRET = os.getenv('CF_ACCESS_CLIENT_SECRET')
 
 # Bot setup
 intents = discord.Intents.default()
@@ -133,6 +135,8 @@ async def lazypack(interaction: discord.Interaction, hours: int = 1):
     headers = {
         'Authorization': f'Bearer {DIFY_API_KEY}',
         'Content-Type': 'application/json',
+        'CF-Access-Client-Id': CF_ACCESS_CLIENT_ID,
+        'CF-Access-Client-Secret': CF_ACCESS_CLIENT_SECRET,
     }
 
     try:
@@ -280,7 +284,7 @@ async def on_message(message):
                 response = await message.reply(embed=embed, mention_author=False, silent=True)
 
             response_map[message.id] = response.id
-            
+
             # Keep map size in check (limit to last 1000 messages)
             if len(response_map) > 1000:
                 oldest_key = next(iter(response_map))
