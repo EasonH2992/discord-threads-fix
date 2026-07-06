@@ -8,7 +8,8 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
-      - ./cookies.json:/app/cookies.json:ro
+      # 若已用 login.py 產生 cookies.json，取消下一行註解即可掛載
+      # - ./cookies.json:/app/cookies.json:ro
     # Alternatively, you can define the token here directly for Unraid template
     # environment:
     #   - DISCORD_TOKEN=your_token_here
