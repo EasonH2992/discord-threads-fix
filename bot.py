@@ -52,7 +52,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Regex to match threads.com/.net or instagram.com URLs (excluding stories)
-META_URL_PATTERN = re.compile(r'https?://(?:www\.)?(?:threads\.(?:com|net)/(?:t/|@[a-zA-Z0-9._-]+/post/)|instagram\.com/(?:p|reel|tv)/)[a-zA-Z0-9_-]+')
+META_URL_PATTERN = re.compile(r'https?://(?:www\.)?(?:threads\.(?:com|net)/(?:t/|@[a-zA-Z0-9._-]+/post/|share/)|instagram\.com/(?:p|reel|tv)/)[a-zA-Z0-9_-]+')
 
 @bot.event
 async def on_ready():
