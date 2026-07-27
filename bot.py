@@ -210,19 +210,23 @@ async def on_message(message):
             embed_color = 0xC13584 if platform_name == "Instagram" else 0x000000
 
             if platform_name == "Instagram":
-                # IG: Extract Name from "Name on Instagram:..."
-                name = raw_title.split(" on Instagram")[0] if " on Instagram" in raw_title else raw_title
-                
+                # IG: Extract Name from "Name on Instagram:..." (or localized "Name在 Instagram:...")
+                title_sep = re.search(r'(?:\bon\b\s*|在\s*)Instagram', raw_title)
+                name = raw_title[:title_sep.start()] if title_sep else raw_title
+
                 # IG: Extract username and clean description from "likes - username on Date: \"...\"."
+                # (or localized "likes - username 於 Date: \"...\".")
                 username = ""
                 clean_desc = description
-                if " on " in description and ": \"" in description:
+                desc_sep = re.search(r'\s(?:on|於)\s', description)
+                if desc_sep and ": \"" in description:
                     prefix = description.split(": \"", 1)[0]
-                    if " - " in prefix:
-                        username = prefix.split(" - ")[-1].split(" on ")[0]
+                    username_part = prefix[:desc_sep.start()]
+                    if " - " in username_part:
+                        username = username_part.split(" - ")[-1].strip()
                     else:
-                        username = prefix.split(" on ")[0]
-                        
+                        username = username_part.strip()
+
                     clean_desc = description.split(": \"", 1)[1]
                     
                     # Strip whitespace first to handle cases like '". '

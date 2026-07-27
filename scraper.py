@@ -170,16 +170,27 @@ async def fetch_metadata(url: str, max_retries: int = None):
                     or (title.startswith("Threads • Log in"))
                     or (title.startswith("Threads • 登入"))
                 )
-                
-                if is_login_wall:
+
+                # Detect a blocked/JS-only shell page: title fell back to the bare
+                # site name (no real og:title) and there's no description or image,
+                # meaning we didn't actually get the post's content.
+                is_empty_shell = (
+                    title in ("Threads", "Instagram")
+                    and not desc
+                    and not metadata.get("image")
+                )
+
+                if is_login_wall or is_empty_shell:
                     remaining = len(attempts) - attempt_idx - 1
                     if remaining > 0:
                         next_ua, _ = attempts[attempt_idx + 1]
                         mode = "cookie" if cookies else "UA"
-                        print(f"Got login page for {url} ({mode}: {ua[:40]}). Retrying with '{next_ua[:40]}'... ({attempt_idx + 1}/{len(attempts)})")
+                        reason = "login page" if is_login_wall else "empty shell page"
+                        print(f"Got {reason} for {url} ({mode}: {ua[:40]}). Retrying with '{next_ua[:40]}'... ({attempt_idx + 1}/{len(attempts)})")
                         continue
                     else:
-                        print(f"Got login page for {url}. All {len(attempts)} attempts exhausted.")
+                        reason = "login page" if is_login_wall else "empty shell page"
+                        print(f"Got {reason} for {url}. All {len(attempts)} attempts exhausted.")
                         return None
 
                 return metadata
