@@ -4,6 +4,9 @@ import re
 import asyncio
 import json
 import os
+from datetime import datetime, timezone, timedelta
+
+_TZ_TPE = timezone(timedelta(hours=8))
 
 _USER_AGENTS = [
     "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
@@ -42,6 +45,135 @@ def _load_cookies() -> dict | None:
         return None
 
 _COOKIES = _load_cookies()
+
+
+def _parse_threads_timestamp(text: str):
+    """Parse Threads embed page's localized timestamp (e.g. '上午1:17 · 2026年7月27日')
+    into an aware UTC datetime. Threads stopped including a machine-readable
+    "taken_at" epoch anywhere in the page, so this text is the only source left."""
+    if not text:
+        return None
+    m = re.match(r"(上午|下午)\s*(\d{1,2}):(\d{2})\s*[·・]\s*(\d{4})年(\d{1,2})月(\d{1,2})日", text.strip())
+    if not m:
+        return None
+    ampm, hh, mm, yyyy, mo, dd = m.groups()
+    hh = int(hh)
+    if ampm == "上午":
+        if hh == 12:
+            hh = 0
+    else:
+        if hh != 12:
+            hh += 12
+    try:
+        dt = datetime(int(yyyy), int(mo), int(dd), hh, int(mm), tzinfo=_TZ_TPE)
+    except ValueError:
+        return None
+    return dt.astimezone(timezone.utc)
+
+
+async def _fetch_threads_embed_extra(embed_url: str):
+    """Threads no longer ships carousel/media JSON in the regular post page's SSR
+    HTML, so full-resolution images, video, caption and timestamp are instead
+    scraped from the official /embed widget page, which is still server-rendered."""
+    for ua in (_USER_AGENTS[0], _BROWSER_UA):
+        headers = {
+            "User-Agent": ua,
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, headers=headers, timeout=10.0) as client:
+                r = await client.get(embed_url)
+                r.raise_for_status()
+                soup = BeautifulSoup(r.content, "html.parser", from_encoding=r.encoding)
+
+                media_container = soup.find(class_="MediaScrollContainer") or soup.find(class_="SoloMediaContainer")
+                images = []
+                video = None
+                if media_container:
+                    video_tag = media_container.find("video")
+                    if video_tag:
+                        source_tag = video_tag.find("source")
+                        if source_tag and source_tag.get("src"):
+                            video = source_tag["src"]
+                    for img in media_container.find_all("img"):
+                        src = img.get("src")
+                        if src:
+                            images.append(src)
+
+                taken_at = None
+                ts_tag = soup.find(class_="Timestamp")
+                if ts_tag:
+                    dt = _parse_threads_timestamp(ts_tag.get_text())
+                    if dt:
+                        taken_at = int(dt.timestamp())
+
+                caption = None
+                body_tag = soup.find(class_="BodyTextContainer")
+                if body_tag:
+                    caption = body_tag.get_text("\n", strip=True)
+
+                if images or video or taken_at or caption:
+                    return {"images": images[:4], "video": video, "taken_at": taken_at, "caption": caption}
+        except Exception:
+            continue
+    return None
+
+
+def _extract_ig_context_json(html_text: str):
+    """Pull the gql_data.shortcode_media object out of an Instagram embed page.
+    It ships as a JSON-encoded string value (contextJSON) inside one of the
+    page's bootloader script blobs, so it needs a second json.loads pass."""
+    m = re.search(r'"contextJSON":"((?:[^"\\]|\\.)*)"', html_text)
+    if not m:
+        return None
+    try:
+        ctx_str = json.loads('"' + m.group(1) + '"')
+        ctx = json.loads(ctx_str)
+        return ctx.get("gql_data", {}).get("shortcode_media")
+    except Exception:
+        return None
+
+
+async def _fetch_ig_embed_extra(embed_url: str):
+    """Instagram's regular post page also stopped shipping carousel/media JSON,
+    so full sidecar images and video are scraped from the /embed/captioned/
+    widget page instead, which still embeds the full GraphQL media object."""
+    headers = {
+        "User-Agent": _USER_AGENTS[0],
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, headers=headers, timeout=10.0) as client:
+            r = await client.get(embed_url)
+            r.raise_for_status()
+            media = _extract_ig_context_json(r.text)
+            if not media:
+                return None
+
+            images = []
+            video = None
+            sidecar = media.get("edge_sidecar_to_children")
+            if sidecar:
+                for edge in sidecar.get("edges", []):
+                    node = edge.get("node", {})
+                    if node.get("is_video"):
+                        if not video and node.get("video_url"):
+                            video = node["video_url"]
+                    elif node.get("display_url"):
+                        images.append(node["display_url"])
+            elif media.get("is_video"):
+                video = media.get("video_url") or None
+            elif media.get("display_url"):
+                images.append(media["display_url"])
+
+            caption = None
+            cap_edges = media.get("edge_media_to_caption", {}).get("edges", [])
+            if cap_edges:
+                caption = cap_edges[0].get("node", {}).get("text")
+
+            return {"images": images[:4], "video": video, "taken_at": None, "caption": caption}
+    except Exception:
+        return None
 
 
 async def fetch_metadata(url: str, max_retries: int = None):
@@ -108,55 +240,7 @@ async def fetch_metadata(url: str, max_retries: int = None):
                 if not metadata["title"] and soup.title:
                     metadata["title"] = soup.title.string
 
-                # Try to extract the timestamp from the JSON blobs
-                match = re.search(r'"taken_at":(\d+)', response.text)
-                if match:
-                    metadata["taken_at"] = int(match.group(1))
-                else:
-                    metadata["taken_at"] = None
-
-                # Try to extract carousel images (multi-image posts).
-                # Only attempt when og:image is an actual post image (summary_large_image),
-                # not a profile picture (summary). Text-only posts use Card=summary and their
-                # og:image is the poster's profile pic; any carousel_media found in the HTML
-                # would belong to a different post embedded on the page.
-                if metadata.get("card") == "summary_large_image" and metadata.get("image"):
-                    idx = response.text.find('"carousel_media":[')
-                    if idx != -1:
-                        start = idx + len('"carousel_media":')
-                        depth, i = 0, start
-                        while i < len(response.text):
-                            if response.text[i] == '[': depth += 1
-                            elif response.text[i] == ']':
-                                depth -= 1
-                                if depth == 0:
-                                    break
-                            i += 1
-                        try:
-                            carousel = json.loads(response.text[start:i+1])
-                            images = []
-                            for item in carousel[:4]:
-                                candidates = item.get("image_versions2", {}).get("candidates", [])
-                                if candidates:
-                                    images.append(candidates[0]["url"])
-                            # Validate that this carousel belongs to the target post by checking
-                            # whether the og:image numeric media-file ID (e.g. "724640022" in
-                            # "724640022_17945406252200696_..._n.jpg") appears in any carousel
-                            # item. Threads sometimes uses a non-first item (e.g. video cover
-                            # frame) as og:image, so we check all items, not just carousel[0].
-                            # No match means the carousel_media block came from a different post.
-                            if images:
-                                og_id = re.search(r'/(\d{9,})_\d+_\d+_n\.', metadata["image"])
-                                if og_id:
-                                    carousel_ids = [
-                                        m.group(1) for url in images
-                                        if (m := re.search(r'/(\d{9,})_\d+_\d+_n\.', url))
-                                    ]
-                                    if og_id.group(1) not in carousel_ids:
-                                        images = []
-                            metadata["images"] = images
-                        except Exception:
-                            pass
+                metadata["taken_at"] = None
 
                 # Detect login wall (Threads redirected to a sign-in page)
                 desc = metadata.get("description")
@@ -192,6 +276,30 @@ async def fetch_metadata(url: str, max_retries: int = None):
                         reason = "login page" if is_login_wall else "empty shell page"
                         print(f"Got {reason} for {url}. All {len(attempts)} attempts exhausted.")
                         return None
+
+                # The regular post page no longer ships carousel/media JSON in its
+                # SSR HTML (Meta removed it), so fetch the official embed widget
+                # page for full-resolution images/video, caption and timestamp.
+                resolved_url = str(response.url).split("?")[0].rstrip("/")
+                is_instagram = "instagram.com" in resolved_url
+                try:
+                    if is_instagram:
+                        extra = await _fetch_ig_embed_extra(resolved_url + "/embed/captioned/")
+                    else:
+                        extra = await _fetch_threads_embed_extra(resolved_url + "/embed")
+                except Exception as e:
+                    print(f"[scraper] embed enrichment failed for {url}: {e}")
+                    extra = None
+
+                if extra:
+                    if extra.get("images"):
+                        metadata["images"] = extra["images"]
+                    if extra.get("video") and not metadata.get("video"):
+                        metadata["video"] = extra["video"]
+                    if extra.get("taken_at"):
+                        metadata["taken_at"] = extra["taken_at"]
+                    if extra.get("caption") and not metadata.get("description"):
+                        metadata["description"] = extra["caption"]
 
                 return metadata
 
