@@ -4,9 +4,14 @@ import re
 import asyncio
 import json
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-_TZ_TPE = timezone(timedelta(hours=8))
+# The Threads /embed page prints its timestamp in Meta's own server timezone
+# (US Pacific), not the viewer's locale — Accept-Language only changes the
+# "上午/下午" wording and date format, not the actual clock time. Use a real
+# IANA zone (not a fixed UTC-7/-8 offset) so DST transitions stay correct.
+_TZ_EMBED = ZoneInfo("America/Los_Angeles")
 
 _USER_AGENTS = [
     "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
@@ -65,7 +70,7 @@ def _parse_threads_timestamp(text: str):
         if hh != 12:
             hh += 12
     try:
-        dt = datetime(int(yyyy), int(mo), int(dd), hh, int(mm), tzinfo=_TZ_TPE)
+        dt = datetime(int(yyyy), int(mo), int(dd), hh, int(mm), tzinfo=_TZ_EMBED)
     except ValueError:
         return None
     return dt.astimezone(timezone.utc)
