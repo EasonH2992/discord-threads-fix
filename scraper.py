@@ -206,6 +206,33 @@ async def _fetch_ig_embed_extra(embed_url: str):
         return None
 
 
+async def _fetch_threads_video_poster(resolved_url: str):
+    """Threads' /embed page gives no poster for video posts (only the raw
+    <video><source> mp4), and the regular post page's og:image (fetched with
+    the UAs known chat-app crawlers use) is Meta's auto-generated "share card"
+    with the username/caption baked in. Refetching the regular post page with
+    a search-engine-style UA (Googlebot/curl) instead returns a real, clean
+    video cover frame from the actual media CDN (t51.*) rather than the card
+    generator (t39.*) — presumably because Meta only stylizes the crawler UAs
+    chat apps use for their own link-preview branding."""
+    headers = {
+        "User-Agent": _USER_AGENTS[2],  # Googlebot
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, headers=headers, timeout=10.0) as client:
+            r = await client.get(resolved_url)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.content, "html.parser", from_encoding=r.encoding)
+            tag = soup.find("meta", {"property": "og:image"})
+            image = tag["content"] if tag and tag.get("content") else None
+            if image and "/t51." in image:
+                return image
+    except Exception:
+        pass
+    return None
+
+
 async def fetch_metadata(url: str, max_retries: int = None):
     """
     Fetches OpenGraph metadata from a Threads or Instagram URL with retry logic.
@@ -339,6 +366,14 @@ async def fetch_metadata(url: str, max_retries: int = None):
                         # rather than treating this as a large media post.
                         metadata["image"] = extra.get("avatar")
                         metadata["card"] = "summary"
+                    elif not is_instagram and extra.get("video") and not extra.get("images"):
+                        # Video post: the og:image we fell back to is Meta's
+                        # auto-generated share card (username/caption baked in,
+                        # faded look), not the video's own cover frame. Try to
+                        # replace it with a real, clean cover frame.
+                        poster = await _fetch_threads_video_poster(resolved_url)
+                        if poster:
+                            metadata["image"] = poster
 
                 return metadata
 
