@@ -121,11 +121,19 @@ async def _fetch_threads_embed_extra(embed_url: str):
                 if body_tag:
                     caption = body_tag.get_text("\n", strip=True)
 
+                avatar = None
+                avatar_container = post_scope.find(class_="AvatarContainer")
+                if avatar_container:
+                    avatar_img = avatar_container.find("img")
+                    if avatar_img and avatar_img.get("src"):
+                        avatar = avatar_img["src"]
+
                 # A post that rendered (we found its author/timestamp chrome) but
                 # has no media container and no video is a genuine text-only post.
                 # Its og:image on the regular post page is Meta's auto-generated
                 # "text card" thumbnail, which has a faded/cut-off look rather
-                # than being a real photo — callers should suppress it.
+                # than being a real photo — callers should fall back to the
+                # author's small avatar instead, like the old summary-card look.
                 rendered = ts_tag is not None or post_scope.find(class_="AuthorIdentity") is not None
                 if rendered:
                     return {
@@ -133,6 +141,7 @@ async def _fetch_threads_embed_extra(embed_url: str):
                         "video": video,
                         "taken_at": taken_at,
                         "caption": caption,
+                        "avatar": avatar,
                         "has_media": media_container is not None or video is not None,
                     }
         except Exception:
@@ -324,7 +333,12 @@ async def fetch_metadata(url: str, max_retries: int = None):
                     if not is_instagram and extra.get("has_media") is False:
                         # Confirmed text-only post: the og:image we fell back to
                         # is Meta's auto-generated "text card", not a real photo.
-                        metadata["image"] = None
+                        # Show the author's avatar as a small thumbnail instead,
+                        # matching the old summary-card look. Force card back to
+                        # "summary" so bot.py's size logic picks set_thumbnail
+                        # rather than treating this as a large media post.
+                        metadata["image"] = extra.get("avatar")
+                        metadata["card"] = "summary"
 
                 return metadata
 
