@@ -86,7 +86,16 @@ async def _fetch_threads_embed_extra(embed_url: str):
                 r.raise_for_status()
                 soup = BeautifulSoup(r.content, "html.parser", from_encoding=r.encoding)
 
-                media_container = soup.find(class_="MediaScrollContainer") or soup.find(class_="SoloMediaContainer")
+                # When the embedded post is a reply, Threads renders the parent
+                # post it's replying to *and* the reply itself as two full post
+                # blocks on the same page. Scope every lookup to the block
+                # carrying "OuterContainerFull" (the actual target of the embed
+                # URL) so we don't pick up the parent post's image/caption/time.
+                post_scope = soup.find(
+                    lambda t: t.name == "div" and t.get("class") and "OuterContainerFull" in t.get("class")
+                ) or soup
+
+                media_container = post_scope.find(class_="MediaScrollContainer") or post_scope.find(class_="SoloMediaContainer")
                 images = []
                 video = None
                 if media_container:
@@ -101,19 +110,31 @@ async def _fetch_threads_embed_extra(embed_url: str):
                             images.append(src)
 
                 taken_at = None
-                ts_tag = soup.find(class_="Timestamp")
+                ts_tag = post_scope.find(class_="Timestamp")
                 if ts_tag:
                     dt = _parse_threads_timestamp(ts_tag.get_text())
                     if dt:
                         taken_at = int(dt.timestamp())
 
                 caption = None
-                body_tag = soup.find(class_="BodyTextContainer")
+                body_tag = post_scope.find(class_="BodyTextContainer")
                 if body_tag:
                     caption = body_tag.get_text("\n", strip=True)
 
-                if images or video or taken_at or caption:
-                    return {"images": images[:4], "video": video, "taken_at": taken_at, "caption": caption}
+                # A post that rendered (we found its author/timestamp chrome) but
+                # has no media container and no video is a genuine text-only post.
+                # Its og:image on the regular post page is Meta's auto-generated
+                # "text card" thumbnail, which has a faded/cut-off look rather
+                # than being a real photo — callers should suppress it.
+                rendered = ts_tag is not None or post_scope.find(class_="AuthorIdentity") is not None
+                if rendered:
+                    return {
+                        "images": images[:4],
+                        "video": video,
+                        "taken_at": taken_at,
+                        "caption": caption,
+                        "has_media": media_container is not None or video is not None,
+                    }
         except Exception:
             continue
     return None
@@ -300,6 +321,10 @@ async def fetch_metadata(url: str, max_retries: int = None):
                         metadata["taken_at"] = extra["taken_at"]
                     if extra.get("caption") and not metadata.get("description"):
                         metadata["description"] = extra["caption"]
+                    if not is_instagram and extra.get("has_media") is False:
+                        # Confirmed text-only post: the og:image we fell back to
+                        # is Meta's auto-generated "text card", not a real photo.
+                        metadata["image"] = None
 
                 return metadata
 
