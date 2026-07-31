@@ -2,6 +2,7 @@ import httpx
 from bs4 import BeautifulSoup
 import re
 import asyncio
+import io
 import json
 import os
 from datetime import datetime, timezone
@@ -265,6 +266,51 @@ async def _fetch_threads_video_poster(resolved_url: str, avatar_url: str = None)
 _COVER_PROBE_BYTES = 512 * 1024
 
 
+# Play badge geometry, as fractions of the frame's short side / the badge box.
+_BADGE_SCALE = 0.20
+_BADGE_SUPERSAMPLE = 4  # draw oversized, then downscale, so edges come out smooth
+
+
+def _overlay_play_button(jpeg_bytes: bytes):
+    """Stamp a play badge over a cover frame we decoded ourselves.
+
+    Such a frame is otherwise indistinguishable from an ordinary photo post,
+    so the badge is what tells the reader there's a video behind the link —
+    the same affordance a native video embed gives. Failures here are not
+    worth losing the frame over, so the original bytes are returned as-is."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return jpeg_bytes
+    try:
+        im = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+        w, h = im.size
+        size = max(48, int(min(w, h) * _BADGE_SCALE))
+        ss = size * _BADGE_SUPERSAMPLE
+
+        badge = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(badge)
+        draw.ellipse((0, 0, ss - 1, ss - 1), fill=(0, 0, 0, 140))
+        # A triangle's optical centre sits left of its bounding box, so nudge
+        # it right to keep it looking centred inside the circle.
+        tw, th = ss * 0.32, ss * 0.36
+        cx, cy = ss / 2 + ss * 0.03, ss / 2
+        draw.polygon(
+            [(cx - tw / 2, cy - th / 2), (cx - tw / 2, cy + th / 2), (cx + tw / 2, cy)],
+            fill=(255, 255, 255, 240),
+        )
+
+        badge = badge.resize((size, size), Image.LANCZOS)
+        im.paste(badge, ((w - size) // 2, (h - size) // 2), badge)
+
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[scraper] play badge overlay failed: {e}")
+        return jpeg_bytes
+
+
 def _ffmpeg_exe():
     """Path to the ffmpeg binary. imageio-ffmpeg bundles a static build, which
     keeps the image ~360MB smaller than installing Debian's ffmpeg package;
@@ -305,7 +351,7 @@ async def _extract_video_cover(video_url: str):
         # of the chunk can break the pipe — communicate() swallows that.
         stdout, stderr = await proc.communicate(chunk)
         if proc.returncode == 0 and stdout:
-            return stdout
+            return _overlay_play_button(stdout)
         print(f"[scraper] cover frame extraction failed (rc={proc.returncode}): "
               f"{stderr[:200].decode(errors='replace')}")
     except Exception as e:

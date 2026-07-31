@@ -5,3 +5,5 @@ python-dotenv
 # ships a static ffmpeg binary for _extract_video_cover — ~90MB on top of the
 # slim image, vs ~450MB for Debian's ffmpeg package and its codec dependencies
 imageio-ffmpeg
+# draws the play badge onto that cover frame (_overlay_play_button)
+Pillow
