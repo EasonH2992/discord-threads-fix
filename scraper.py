@@ -258,6 +258,61 @@ async def _fetch_threads_video_poster(resolved_url: str, avatar_url: str = None)
     return None
 
 
+# How much of the mp4 to pull when decoding a cover frame ourselves. Meta's
+# CDN serves faststart-style files (moov atom up front), so the first frame
+# decodes from a small prefix — 128KB sufficed in testing; 512KB leaves
+# headroom for higher-bitrate clips while still being a fraction of the file.
+_COVER_PROBE_BYTES = 512 * 1024
+
+
+def _ffmpeg_exe():
+    """Path to the ffmpeg binary. imageio-ffmpeg bundles a static build, which
+    keeps the image ~360MB smaller than installing Debian's ffmpeg package;
+    fall back to whatever is on PATH so a dev box without it still works."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+
+async def _extract_video_cover(video_url: str):
+    """Decode the video's own first frame into JPEG bytes.
+
+    Some Threads posts — notably ones cross-posted from an Instagram video or
+    Reel — have no cover frame anywhere in Meta's markup: every crawler UA
+    returns either the auto-generated share card or the author's avatar, and
+    the /embed page's <video> tag carries no poster attribute. Decoding the
+    frame locally is the only way to show what the video actually contains.
+
+    Only the head of the file is fetched (the CDN honours Range requests) and
+    ffmpeg reads it straight from stdin, so this needs no temp files and costs
+    a fraction of a full download."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            r = await client.get(video_url, headers={"Range": f"bytes=0-{_COVER_PROBE_BYTES - 1}"})
+            r.raise_for_status()
+            chunk = r.content
+
+        proc = await asyncio.create_subprocess_exec(
+            _ffmpeg_exe(), "-v", "error", "-i", "pipe:0",
+            "-frames:v", "1", "-q:v", "3", "-f", "image2", "-vcodec", "mjpeg", "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        # ffmpeg stops reading as soon as it has the frame, so the unread tail
+        # of the chunk can break the pipe — communicate() swallows that.
+        stdout, stderr = await proc.communicate(chunk)
+        if proc.returncode == 0 and stdout:
+            return stdout
+        print(f"[scraper] cover frame extraction failed (rc={proc.returncode}): "
+              f"{stderr[:200].decode(errors='replace')}")
+    except Exception as e:
+        print(f"[scraper] cover frame extraction failed: {e}")
+    return None
+
+
 async def fetch_metadata(url: str, max_retries: int = None):
     """
     Fetches OpenGraph metadata from a Threads or Instagram URL with retry logic.
@@ -399,6 +454,11 @@ async def fetch_metadata(url: str, max_retries: int = None):
                         poster = await _fetch_threads_video_poster(resolved_url, extra.get("avatar"))
                         if poster:
                             metadata["image"] = poster
+                        else:
+                            # Meta ships no cover frame for this post at all,
+                            # so decode the video's first frame ourselves and
+                            # let the caller upload it alongside the embed.
+                            metadata["cover_bytes"] = await _extract_video_cover(extra["video"])
 
                 return metadata
 

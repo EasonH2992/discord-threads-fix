@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import os
 import re
+import io
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import httpx
@@ -30,6 +31,9 @@ def log_metadata(url: str, metadata: dict):
         f"Card: {metadata.get('card')}",
         f"Taken At: {metadata.get('taken_at')}",
     ]
+    cover_bytes = metadata.get("cover_bytes")
+    if cover_bytes:
+        lines.append(f"Local Cover Frame: {len(cover_bytes)} bytes (decoded from video)")
     images = metadata.get("images", [])
     if images:
         lines.append(f"Carousel Images ({len(images)}):")
@@ -256,7 +260,14 @@ async def on_message(message):
                 color=embed_color
             )
             
-            if metadata.get("image"):
+            # A cover frame we decoded ourselves has no public URL, so it must
+            # be uploaded with the message and referenced via attachment://
+            cover_bytes = metadata.get("cover_bytes")
+            files = []
+            if cover_bytes:
+                files.append(discord.File(io.BytesIO(cover_bytes), filename="cover.jpg"))
+                embed.set_image(url="attachment://cover.jpg")
+            elif metadata.get("image"):
                 # Use large image for posts with media, small thumbnail for text-only/profile posts
                 if metadata.get("card") == "summary_large_image" or metadata.get("video"):
                     embed.set_image(url=metadata["image"])
@@ -283,9 +294,9 @@ async def on_message(message):
                     discord.Embed(url=post_url).set_image(url=img)
                     for img in images[1:]
                 ]
-                response = await message.reply(embeds=[embed] + extra_embeds, mention_author=False, silent=True)
+                response = await message.reply(embeds=[embed] + extra_embeds, files=files, mention_author=False, silent=True)
             else:
-                response = await message.reply(embed=embed, mention_author=False, silent=True)
+                response = await message.reply(embed=embed, files=files, mention_author=False, silent=True)
 
             response_map[message.id] = response.id
 

@@ -2,3 +2,6 @@ discord.py
 httpx
 beautifulsoup4
 python-dotenv
+# ships a static ffmpeg binary for _extract_video_cover — ~90MB on top of the
+# slim image, vs ~450MB for Debian's ffmpeg package and its codec dependencies
+imageio-ffmpeg
