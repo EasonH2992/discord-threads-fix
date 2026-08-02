@@ -155,6 +155,46 @@ async def _fetch_threads_embed_extra(embed_url: str):
     return None
 
 
+# Instagram's media ids are Snowflake-style: the top 41 bits are the post time
+# in milliseconds since Instagram's own epoch (2011-08-24 21:07:01.721 UTC).
+# Meta stopped shipping "taken_at_timestamp" in the embed page's JSON, so this
+# is the only source left for an Instagram post's time — and it's exact.
+_IG_ID_EPOCH_MS = 1314220021721
+_IG_ID_TIME_SHIFT = 23
+_IG_SHORTCODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+
+def _ig_media_id_to_taken_at(media_id):
+    """Recover a post's epoch seconds from its numeric media id."""
+    try:
+        ms = (int(media_id) >> _IG_ID_TIME_SHIFT) + _IG_ID_EPOCH_MS
+    except (TypeError, ValueError):
+        return None
+    taken_at = ms // 1000
+    # Reject anything outside Instagram's lifetime — a malformed id would
+    # otherwise decode into a plausible-looking but wrong timestamp.
+    now = int(datetime.now(tz=timezone.utc).timestamp())
+    if not (1262304000 <= taken_at <= now + 86400):  # 2010-01-01 .. tomorrow
+        return None
+    return taken_at
+
+
+def _ig_shortcode_taken_at(url: str):
+    """Same trick straight from the URL: an Instagram shortcode is just the
+    media id in base64, so /p/<code>/ alone is enough to date the post even
+    when the embed page gives us nothing."""
+    m = re.search(r"instagram\.com/(?:[^/]+/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)", url or "")
+    if not m:
+        return None
+    media_id = 0
+    for ch in m.group(1):
+        idx = _IG_SHORTCODE_ALPHABET.find(ch)
+        if idx < 0:
+            return None
+        media_id = media_id * 64 + idx
+    return _ig_media_id_to_taken_at(media_id)
+
+
 def _extract_ig_context_json(html_text: str):
     """Pull the gql_data.shortcode_media object out of an Instagram embed page.
     It ships as a JSON-encoded string value (contextJSON) inside one of the
@@ -207,7 +247,12 @@ async def _fetch_ig_embed_extra(embed_url: str):
             if cap_edges:
                 caption = cap_edges[0].get("node", {}).get("text")
 
-            return {"images": images[:4], "video": video, "taken_at": None, "caption": caption}
+            return {
+                "images": images[:4],
+                "video": video,
+                "taken_at": _ig_media_id_to_taken_at(media.get("id")),
+                "caption": caption,
+            }
     except Exception:
         return None
 
@@ -465,6 +510,8 @@ async def fetch_metadata(url: str, max_retries: int = None):
                 # page for full-resolution images/video, caption and timestamp.
                 resolved_url = str(response.url).split("?")[0].rstrip("/")
                 is_instagram = "instagram.com" in resolved_url
+                if is_instagram:
+                    metadata["taken_at"] = _ig_shortcode_taken_at(resolved_url)
                 try:
                     if is_instagram:
                         extra = await _fetch_ig_embed_extra(resolved_url + "/embed/captioned/")
