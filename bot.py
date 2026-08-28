@@ -300,6 +300,15 @@ async def on_message(message):
 
             response_map[message.id] = response.id
 
+            # Hide Discord's built-in link preview after our custom preview is sent.
+            # This only suppresses embeds on the user's original message; it does
+            # not delete the message or its URL. The bot may not have permission
+            # to manage messages, so failure here must never stop the bot.
+            try:
+                await message.edit(suppress=True)
+            except Exception as e:
+                print(f"Failed to suppress original link preview for message {message.id}: {e}", flush=True)
+
             # Keep map size in check (limit to last 1000 messages)
             if len(response_map) > 1000:
                 oldest_key = next(iter(response_map))
