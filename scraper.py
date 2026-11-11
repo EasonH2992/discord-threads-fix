@@ -25,6 +25,9 @@ _USER_AGENTS = [
     "curl/8.7.1",
 ]
 
+# What Threads' og:description puts in place of each inline GIF sticker.
+_STICKER_PLACEHOLDER = "▓"
+
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -125,7 +128,12 @@ async def _fetch_threads_embed_extra(embed_url: str):
                 caption = None
                 body_tag = post_scope.find(class_="BodyTextContainer")
                 if body_tag:
-                    caption = body_tag.get_text("\n", strip=True)
+                    # Inline GIF stickers are <img class="InlineSticker"> between
+                    # the text <span>s, so joining only the text nodes drops them
+                    # cleanly. Join with "" — the post's own line breaks are
+                    # literal "\n" inside the spans, and a "\n" separator would
+                    # split a sentence wherever a sticker/link/mention sat.
+                    caption = body_tag.get_text("").strip() or None
 
                 avatar = None
                 avatar_container = post_scope.find(class_="AvatarContainer")
@@ -224,6 +232,16 @@ async def _fetch_ig_embed_extra(embed_url: str):
             r.raise_for_status()
             media = _extract_ig_context_json(r.text)
             if not media:
+                # Single-photo posts ship "contextJSON":null — no GraphQL object
+                # at all. The rendered <img class="EmbeddedMediaImage"> still
+                # carries the full, uncropped photo, whereas the og:image we'd
+                # otherwise fall back to is a center-cropped square thumbnail
+                # (stp=c<x>.<y>.<w>.<h>a_..._s640x640), and its signed URL
+                # can't be rewritten to drop the crop.
+                soup = BeautifulSoup(r.text, "html.parser")
+                img = soup.find("img", class_="EmbeddedMediaImage")
+                if img and img.get("src"):
+                    return {"images": [img["src"]], "video": None, "taken_at": None, "caption": None}
                 return None
 
             images = []
@@ -530,6 +548,15 @@ async def fetch_metadata(url: str, max_retries: int = None):
                         metadata["taken_at"] = extra["taken_at"]
                     if extra.get("caption") and not metadata.get("description"):
                         metadata["description"] = extra["caption"]
+                    elif (
+                        not is_instagram
+                        and extra.get("caption")
+                        and _STICKER_PLACEHOLDER in (metadata.get("description") or "")
+                    ):
+                        # og:description replaces every inline GIF sticker with
+                        # a "▓", which Discord shows as a redacted-looking block.
+                        # The embed page's caption has the same text without them.
+                        metadata["description"] = extra["caption"]
                     if not is_instagram and extra.get("has_media") is False:
                         # Confirmed text-only post: the og:image we fell back to
                         # is Meta's auto-generated "text card", not a real photo.
@@ -552,6 +579,13 @@ async def fetch_metadata(url: str, max_retries: int = None):
                             # so decode the video's first frame ourselves and
                             # let the caller upload it alongside the embed.
                             metadata["cover_bytes"] = await _extract_video_cover(extra["video"])
+
+                if not is_instagram and metadata.get("description"):
+                    # Embed enrichment failed or had no caption: at least drop
+                    # the placeholders rather than show a row of blocks.
+                    metadata["description"] = re.sub(
+                        r"[ \t]*" + _STICKER_PLACEHOLDER + r"+", "", metadata["description"]
+                    ).strip() or None
 
                 return metadata
 
