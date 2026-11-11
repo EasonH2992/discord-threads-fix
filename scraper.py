@@ -232,6 +232,16 @@ async def _fetch_ig_embed_extra(embed_url: str):
             r.raise_for_status()
             media = _extract_ig_context_json(r.text)
             if not media:
+                # Single-photo posts ship "contextJSON":null — no GraphQL object
+                # at all. The rendered <img class="EmbeddedMediaImage"> still
+                # carries the full, uncropped photo, whereas the og:image we'd
+                # otherwise fall back to is a center-cropped square thumbnail
+                # (stp=c<x>.<y>.<w>.<h>a_..._s640x640), and its signed URL
+                # can't be rewritten to drop the crop.
+                soup = BeautifulSoup(r.text, "html.parser")
+                img = soup.find("img", class_="EmbeddedMediaImage")
+                if img and img.get("src"):
+                    return {"images": [img["src"]], "video": None, "taken_at": None, "caption": None}
                 return None
 
             images = []
