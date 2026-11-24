@@ -304,6 +304,21 @@ async def _fetch_threads_video_poster(resolved_url: str, avatar_url: str = None)
     tell it apart from a real cover frame. Compare against the already-known
     avatar URL (scraped from the /embed page) and reject a "poster" that's
     actually just the avatar at a different resolution."""
+    og = await _fetch_threads_googlebot_og(resolved_url)
+    image = og and og["image"]
+    if image and "/t51." in image and _cdn_asset_id(image) != _cdn_asset_id(avatar_url):
+        return image
+    return None
+
+
+async def _fetch_threads_googlebot_og(resolved_url: str):
+    """Fetch the regular post page as Googlebot and return its og:image and
+    twitter:card. Unlike the chat-app crawler UAs (which always get Meta's
+    auto-generated t39.* share card with card=summary_large_image, even for
+    text-only posts), Googlebot gets the post's real first media (t51.*-15)
+    with summary_large_image, or — for a text-only post — the author's avatar
+    (t51.*-19) with card=summary. That makes it a usable text-only/media
+    signal when the /embed page is unavailable."""
     headers = {
         "User-Agent": _USER_AGENTS[2],  # Googlebot
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -313,13 +328,14 @@ async def _fetch_threads_video_poster(resolved_url: str, avatar_url: str = None)
             r = await client.get(resolved_url)
             r.raise_for_status()
             soup = BeautifulSoup(r.content, "html.parser", from_encoding=r.encoding)
-            tag = soup.find("meta", {"property": "og:image"})
-            image = tag["content"] if tag and tag.get("content") else None
-            if image and "/t51." in image and _cdn_asset_id(image) != _cdn_asset_id(avatar_url):
-                return image
+            img_tag = soup.find("meta", {"property": "og:image"})
+            card_tag = soup.find("meta", {"name": "twitter:card"})
+            return {
+                "image": img_tag["content"] if img_tag and img_tag.get("content") else None,
+                "card": card_tag["content"] if card_tag and card_tag.get("content") else None,
+            }
     except Exception:
-        pass
-    return None
+        return None
 
 
 # How much of the mp4 to pull when decoding a cover frame ourselves. Meta's
@@ -579,6 +595,19 @@ async def fetch_metadata(url: str, max_retries: int = None):
                             # so decode the video's first frame ourselves and
                             # let the caller upload it alongside the embed.
                             metadata["cover_bytes"] = await _extract_video_cover(extra["video"])
+
+                elif not is_instagram and "/t39." in (metadata.get("image") or ""):
+                    # The /embed page is unavailable for this post (authors can
+                    # disable embedding — Threads then serves "Thread not
+                    # available"), so we can't tell text-only from media posts
+                    # there, and the og:image is Meta's auto-generated share
+                    # card either way. Ask Googlebot's view of the page instead:
+                    # it gives the real first photo/cover for media posts, and
+                    # the author's avatar with card=summary for text-only ones.
+                    og = await _fetch_threads_googlebot_og(resolved_url)
+                    if og and og.get("image") and "/t51." in og["image"]:
+                        metadata["image"] = og["image"]
+                        metadata["card"] = og.get("card") or metadata.get("card")
 
                 if not is_instagram and metadata.get("description"):
                     # Embed enrichment failed or had no caption: at least drop
