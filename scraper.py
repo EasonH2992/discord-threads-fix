@@ -191,7 +191,12 @@ def _ig_shortcode_taken_at(url: str):
     """Same trick straight from the URL: an Instagram shortcode is just the
     media id in base64, so /p/<code>/ alone is enough to date the post even
     when the embed page gives us nothing."""
-    m = re.search(r"instagram\.com/(?:[^/]+/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)", url or "")
+    # Threads post codes (threads.com/@user/post/<code>) share the same
+    # media-id encoding, so they decode the same way.
+    m = re.search(
+        r"(?:instagram\.com/(?:[^/]+/)?(?:p|reel|reels|tv)|threads\.(?:com|net)/@[^/]+/post)/([A-Za-z0-9_-]+)",
+        url or "",
+    )
     if not m:
         return None
     media_id = 0
@@ -608,6 +613,11 @@ async def fetch_metadata(url: str, max_retries: int = None):
                     if og and og.get("image") and "/t51." in og["image"]:
                         metadata["image"] = og["image"]
                         metadata["card"] = og.get("card") or metadata.get("card")
+
+                if not is_instagram and not metadata.get("taken_at"):
+                    # No timestamp from /embed (e.g. "Thread not available"):
+                    # the post code itself encodes the exact post time.
+                    metadata["taken_at"] = _ig_shortcode_taken_at(resolved_url)
 
                 if not is_instagram and metadata.get("description"):
                     # Embed enrichment failed or had no caption: at least drop
